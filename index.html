@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Бронирование парковки — игра на скорость реакции</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: 'Manrope', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+    color: #0f172a;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  button { font-family: inherit; }
+
+  /* ── Фон «карта города» ── */
+  .map-bg { position: fixed; inset: 0; z-index: -10; overflow: hidden; user-select: none; pointer-events: none; }
+  .map-bg svg { width: 100%; height: 100%; }
+  .map-haze { position: absolute; inset: 0; background: rgba(255,255,255,.25); }
+
+  /* ── Каркас ── */
+  main { margin: 0 auto; width: 100%; max-width: 440px; flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 32px 16px; }
+  .card {
+    border-radius: 16px; background: rgba(255,255,255,.95); padding: 20px;
+    box-shadow: 0 10px 15px -3px rgba(0,0,0,.1), 0 4px 6px -4px rgba(0,0,0,.1);
+    backdrop-filter: blur(8px);
+  }
+  @media (min-width: 640px) { .card { padding: 24px; } main { padding: 40px 16px; } }
+  h1 { font-size: 20px; font-weight: 800; letter-spacing: -0.025em; }
+
+  .fg { margin-top: 16px; }
+  .fg-label { display: block; font-size: 13px; color: #9ca3af; }
+  .trigger {
+    margin-top: 6px; height: 48px; width: 100%; display: flex; align-items: center;
+    justify-content: space-between; gap: 8px; border-radius: 12px; border: 1px solid #e5e7eb;
+    background: #fff; padding: 0 16px; text-align: left; font-size: 16px; color: #0f172a;
+    cursor: pointer; transition: border-color .15s;
+  }
+  .trigger:hover { border-color: #d1d5db; }
+  .trigger.window-open { border-color: rgba(47,197,83,.6); }
+  .trigger > span.txt { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .field-empty { color: #d1d5db; }
+  .field-selected { font-weight: 600; color: #111827; }
+  .icon-box { display: inline-flex; height: 32px; width: 32px; align-items: center; justify-content: center; border-radius: 8px; flex: none; }
+  .icon-box.active { background: rgba(47,197,83,.1); animation: window-pulse 5s ease-in-out infinite; }
+  .icon-box svg { width: 20px; height: 20px; color: #374151; }
+
+  /* ── Выпадающий список адресов ── */
+  .sel-wrap { position: relative; }
+  .sel-pop {
+    position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 40;
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 4px;
+    box-shadow: 0 10px 15px -3px rgba(0,0,0,.1), 0 4px 6px -4px rgba(0,0,0,.1);
+    animation: pop-in .12s ease-out;
+  }
+  .sel-item {
+    width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 8px 10px; border: none; background: none; border-radius: 6px;
+    font-size: 16px; text-align: left; cursor: pointer; color: #0f172a;
+  }
+  .sel-item:hover { background: #f3f4f6; }
+  .sel-item svg { width: 16px; height: 16px; flex: none; }
+
+  /* ── Календарь ── */
+  .calendar {
+    margin: 4px 4px 16px; border-radius: 12px; border: 1px solid #f3f4f6; background: #fff;
+    padding: 12px; box-shadow: 0 1px 2px 0 rgba(0,0,0,.05); animation: cal-in .15s ease-out;
+  }
+  .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .cal-title { font-size: 14px; font-weight: 600; color: #111827; }
+  .nav-group { display: flex; gap: 2px; }
+  .nav-btn {
+    display: inline-flex; height: 32px; width: 32px; align-items: center; justify-content: center;
+    border-radius: 6px; border: none; background: none; color: #6b7280; cursor: pointer; transition: all .15s;
+  }
+  .nav-btn:hover { background: #f3f4f6; color: #1f2937; }
+  .nav-btn svg { width: 16px; height: 16px; }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); row-gap: 4px; }
+  .wd { height: 28px; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .025em; color: #9ca3af; }
+  .day-cell { display: flex; justify-content: center; }
+  .day {
+    height: 36px; width: 36px; display: flex; align-items: center; justify-content: center;
+    border-radius: 9999px; border: none; background: none; font-size: 14px; transition: all .15s;
+  }
+  .day.other { color: #d1d5db; cursor: default; }
+  .day.normal { color: #9ca3af; cursor: pointer; }
+  .day.normal:hover { background: #f3f4f6; }
+  .day.target-off { color: #d1d5db; cursor: not-allowed; }
+  .day.target-on { background: #2FC553; color: #fff; font-weight: 700; cursor: pointer; animation: window-pulse 5s ease-in-out infinite; }
+  .day.target-on:hover { background: #29B44A; }
+  .day.selected { background: #2FC553; color: #fff; font-weight: 700; box-shadow: 0 0 0 4px rgba(47,197,83,.2); }
+  .day.today-ring { box-shadow: 0 0 0 1px #9ca3af; }
+  .day.selected.today-ring { box-shadow: 0 0 0 4px rgba(47,197,83,.2), 0 0 0 1px #9ca3af inset; }
+
+  /* ── Кнопка бронирования ── */
+  .btn-book {
+    position: relative; margin-top: 20px; height: 48px; width: 100%; display: flex; align-items: center;
+    justify-content: center; overflow: hidden; border-radius: 12px; border: none;
+    font-size: 16px; font-weight: 600; color: #fff; cursor: pointer; transition: all .15s;
+    background: #2FC553; box-shadow: 0 4px 6px -1px rgba(34,197,94,.25);
+  }
+  .btn-book:hover { background: #29B44A; }
+  .btn-book:active { transform: scale(.99); }
+  .btn-book:disabled { background: rgba(47,197,83,.4); cursor: not-allowed; box-shadow: none; transform: none; }
+  .btn-spin { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+  .btn-spin svg { width: 36px; height: 36px; color: rgba(255,255,255,.45); }
+  .btn-label { position: relative; display: flex; align-items: center; gap: 8px; }
+  .btn-label svg { width: 20px; height: 20px; }
+
+  /* ── Подсказка ── */
+  .help-btn {
+    margin-top: 16px; display: flex; align-items: center; gap: 6px; border: none; background: none;
+    font-size: 12px; font-weight: 500; color: #6b7280; cursor: pointer; transition: color .15s;
+  }
+  .help-btn:hover { color: #374151; }
+  .help-btn svg { width: 14px; height: 14px; }
+  .help-list { margin-top: 8px; padding-left: 20px; font-size: 12px; line-height: 1.625; color: #6b7280; }
+  .help-list li { margin-bottom: 6px; }
+
+  /* ── Диалог результата ── */
+  .dlg-overlay { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.5); animation: fade-in .2s ease-out; }
+  .dlg {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 50;
+    width: 100%; max-width: 384px; background: #fff; border: 1px solid #e5e7eb; border-radius: 16px;
+    padding: 24px; box-shadow: 0 10px 15px -3px rgba(0,0,0,.1), 0 4px 6px -4px rgba(0,0,0,.1);
+    text-align: center; display: grid; gap: 16px; animation: dlg-in .2s ease-out;
+  }
+  .dlg[hidden], .dlg-overlay[hidden] { display: none; }
+  .dlg-x {
+    position: absolute; top: 16px; right: 16px; border: none; background: none; opacity: .7;
+    color: #374151; cursor: pointer; display: inline-flex; padding: 2px;
+  }
+  .dlg-x:hover { opacity: 1; }
+  .dlg-x svg { width: 16px; height: 16px; }
+  .succ-icon { margin: 8px auto 0; height: 64px; width: 64px; display: flex; align-items: center; justify-content: center; border-radius: 9999px; background: #dcfce7; }
+  .succ-icon svg { width: 36px; height: 36px; color: #2FC553; }
+  .dlg-title { font-size: 20px; font-weight: 800; }
+  .dlg-title.orange { font-size: 24px; color: #f97316; }
+  .dlg-desc { color: #6b7280; font-size: 14px; }
+  .react-badge {
+    display: inline-flex; align-items: center; gap: 4px; border-radius: 9999px; background: #f0fdf4;
+    padding: 4px 12px; font-size: 14px; font-weight: 600; color: #1F9B41; font-variant-numeric: tabular-nums;
+    justify-content: center; width: fit-content; margin: 0 auto;
+  }
+  .react-badge svg { width: 14px; height: 14px; }
+  .dlg-btn { margin-top: 16px; height: 44px; width: 100%; border-radius: 12px; border: none; background: #2FC553; color: #fff; font-weight: 600; font-size: 16px; cursor: pointer; transition: background .15s; }
+  .dlg-btn:hover { background: #29B44A; }
+  .fail-wrap { padding: 16px 0; display: grid; gap: 6px; }
+
+  /* ── Тосты ── */
+  .toast-vp { position: fixed; right: 0; bottom: 0; z-index: 100; padding: 16px; display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 420px; }
+  .toast {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 16px;
+    box-shadow: 0 10px 15px -3px rgba(0,0,0,.1), 0 4px 6px -4px rgba(0,0,0,.1);
+    animation: toast-in .2s ease-out; pointer-events: auto;
+  }
+  .toast.out { opacity: 0; transition: opacity .2s; }
+  .toast-title { font-weight: 600; font-size: 14px; }
+  .toast-desc { font-size: 14px; color: #6b7280; margin-top: 2px; }
+
+  /* ── Спиннер у курсора ── */
+  .cursor-spinner { position: fixed; left: 0; top: 0; z-index: 100; pointer-events: none; color: #6b7280; }
+  .cursor-spinner svg { width: 20px; height: 20px; }
+
+  /* ── Анимации ── */
+  @keyframes window-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(47,197,83,.45); }
+    50% { box-shadow: 0 0 0 8px rgba(47,197,83,0); }
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spin { animation: spin 1s linear infinite; }
+  @keyframes cal-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+  @keyframes pop-in { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
+  @keyframes toast-in { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+  @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes dlg-in { from { opacity: 0; transform: translate(-50%, -50%) scale(.95); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
+</style>
+</head>
+<body>
+
+<!-- Фон: карта города -->
+<div class="map-bg" aria-hidden="true">
+  <svg viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+    <rect width="1440" height="900" fill="#EEF0E7"/>
+    <path d="M-40 120 Q180 40 340 140 T560 110 Q660 160 600 260 T380 320 Q200 340 120 280 T-40 300 Z" fill="#C9E5AD" opacity="0.85"/>
+    <path d="M1150 40 Q1330 10 1430 120 T1400 340 Q1280 400 1180 340 T1080 180 Q1090 80 1150 40 Z" fill="#BEDFA0" opacity="0.8"/>
+    <path d="M180 640 Q360 560 520 640 T700 760 Q640 860 460 850 T220 780 Q140 700 180 640 Z" fill="#C9E5AD" opacity="0.8"/>
+    <ellipse cx="1180" cy="700" rx="150" ry="90" fill="#B7DD9C" opacity="0.75"/>
+    <ellipse cx="760" cy="240" rx="70" ry="42" fill="#C9E5AD" opacity="0.7"/>
+    <path d="M-30 470 C 240 420 420 540 720 520 S 1180 430 1470 480" stroke="#A9D3EE" stroke-width="34" fill="none" stroke-linecap="round" opacity="0.9"/>
+    <rect x="640" y="600" width="180" height="120" rx="10" fill="#E5E3D9" opacity="0.9"/>
+    <rect x="880" y="560" width="150" height="90" rx="10" fill="#E5E3D9" opacity="0.85"/>
+    <rect x="420" y="380" width="130" height="90" rx="10" fill="#E5E3D9" opacity="0.85"/>
+    <rect x="900" y="300" width="120" height="80" rx="10" fill="#E5E3D9" opacity="0.8"/>
+    <rect x="240" y="450" width="110" height="70" rx="10" fill="#E5E3D9" opacity="0.8"/>
+    <rect x="1080" y="470" width="140" height="80" rx="10" fill="#E5E3D9" opacity="0.85"/>
+    <g stroke="#FFFFFF" stroke-width="8" fill="none" stroke-linecap="round">
+      <path d="M-20 360 H 1460"/>
+      <path d="M-20 580 H 1460" opacity="0.9"/>
+      <path d="M320 -20 V 920"/>
+      <path d="M700 -20 V 920" opacity="0.9"/>
+      <path d="M1040 -20 V 920"/>
+      <path d="M520 120 L 900 760" opacity="0.85"/>
+      <path d="M1200 620 L 820 900" opacity="0.8"/>
+    </g>
+    <g fill="none" stroke-linecap="round">
+      <path d="M-30 200 C 360 160 900 260 1470 190" stroke="#F1CC6E" stroke-width="15"/>
+      <path d="M-30 200 C 360 160 900 260 1470 190" stroke="#FBE49B" stroke-width="10"/>
+      <path d="M860 -30 C 830 300 920 640 880 930" stroke="#F1CC6E" stroke-width="15"/>
+      <path d="M860 -30 C 830 300 920 640 880 930" stroke="#FBE49B" stroke-width="10"/>
+    </g>
+  </svg>
+  <div class="map-haze"></div>
+</div>
+
+<main>
+  <section class="card">
+    <h1>Бронирование парковки</h1>
+
+    <!-- Адрес -->
+    <div class="fg">
+      <span class="fg-label">Выберите адрес</span>
+      <div class="sel-wrap">
+        <button type="button" id="addr-trigger" class="trigger" aria-haspopup="listbox" aria-expanded="false">
+          <span class="txt" id="addr-text"></span>
+          <span class="icon-box" id="addr-chev"></span>
+        </button>
+        <div class="sel-pop" id="addr-pop" hidden role="listbox"></div>
+      </div>
+    </div>
+
+    <!-- Дата -->
+    <div class="fg">
+      <span class="fg-label">Забронировать на</span>
+      <button type="button" id="date-trigger" class="trigger" aria-haspopup="dialog" aria-expanded="false">
+        <span class="txt" id="date-text"></span>
+        <span class="icon-box" id="date-ico"></span>
+      </button>
+      <div id="cal-root"></div>
+    </div>
+
+    <!-- Кнопка -->
+    <button type="button" id="book-btn" class="btn-book" aria-live="polite">
+      <span class="btn-spin" id="book-spin" hidden></span>
+      <span class="btn-label" id="book-label"></span>
+    </button>
+
+    <!-- Подсказка -->
+    <button type="button" id="help-btn" class="help-btn"><span id="help-ico"></span>Как играть?</button>
+    <ol class="help-list" id="help-list" hidden>
+      <li>Ровно каждую минуту (в :00) на 5 секунд открывается окно бронирования — следи за таймером и готовься.</li>
+    </ol>
+  </section>
+</main>
+
+<!-- Тосты -->
+<div class="toast-vp" id="toast-vp"></div>
+
+<!-- Диалог результата -->
+<div class="dlg-overlay" id="dlg-overlay" hidden></div>
+<div class="dlg" id="dlg" hidden role="dialog" aria-modal="true"></div>
+
+<!-- Спиннер у курсора -->
+<div class="cursor-spinner" id="cursor-spinner" hidden></div>
+
+<script>
+(() => {
+"use strict";
+
+/* ═══════════════ Константы игры ═══════════════ */
+const MINUTE_MS = 60_000;
+const WINDOW_MS = 5_000;          // окно выбора даты: 5 секунд каждую минуту
+const BOOK_WINDOW_MS = 1_500;     // успех — только при нажатии «Забронировать» в первые 1500 мс
+const SUCCESS_DELAY_MS = 10_000;  // перед успехом «сервер» думает 10 секунд
+const TIMEOUT_MS = 20_000;        // перед ошибкой — 20 секунд
+const CAR_NUMBER = "Е666КХ77";    // скрыт из интерфейса, идёт в «запрос»
+const ADDRESSES = ["Москва, Кутузовский 32", "Москва, Вавилова 19"];
+/* Три случайных сообщения при неудачной попытке — показывается одно из них */
+const FAIL_MESSAGES = [
+  { title: "Request timeout", subtitle: "превышено время на запрос" },
+  { title: "Network error", subtitle: "сетевое соединение прервано" },
+  { title: "На данную дату закончились места", subtitle: null },
+];
+const MONTHS_SHORT = ["янв.","февр.","марта","апр.","мая","июня","июля","авг.","сент.","окт.","нояб.","дек."];
+const WEEKDAYS = ["ПН", "ВТ", "СР", "ЧТ", "ПТ", "СБ", "ВС"];
+
+/* ═══════════════ SVG-иконки (lucide) ═══════════════ */
+const PATHS = {
+  calendar: '<rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/>',
+  car: '<path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2"/><circle cx="7" cy="17" r="2"/><path d="M9 17h6"/><circle cx="17" cy="17" r="2"/>',
+  check2: '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>',
+  help: '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
+  loader: '<path d="M21 12a9 9 0 1 1-6.219-8.56"/>',
+  zap: '<path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/>',
+  chevDown: '<path d="m6 9 6 6 6-6"/>',
+  chevLeft: '<path d="m15 18-6-6 6-6"/>',
+  chevRight: '<path d="m9 18 6-6-6-6"/>',
+  chevsLeft: '<path d="m11 17-5-5 5-5"/><path d="m18 17-5-5 5-5"/>',
+  chevsRight: '<path d="m6 17 5-5-5-5"/><path d="m13 17 5-5-5-5"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+};
+const icon = (name) =>
+  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${PATHS[name]}</svg>`;
+
+/* ═══════════════ Звук (WebAudio) ═══════════════ */
+let audioCtx = null;
+function initAudio() {
+  if (!audioCtx) {
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) audioCtx = new AC();
+    } catch { audioCtx = null; }
+  }
+  if (audioCtx && audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+}
+function tone(freq, dur = 0.08, type = "sine", gain = 0.05, delay = 0) {
+  if (!audioCtx) return;
+  try {
+    const t = audioCtx.currentTime + delay;
+    const osc = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    osc.type = type; osc.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(gain, t + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(g); g.connect(audioCtx.destination);
+    osc.start(t); osc.stop(t + dur + 0.05);
+  } catch {}
+}
+const sounds = {
+  windowOpen() { tone(880, .09, "sine", .06); tone(1318, .1, "sine", .045, .06); },
+  success() { tone(659, .1, "sine", .06); tone(880, .1, "sine", .06, .09); tone(1174, .18, "sine", .06, .18); },
+  fail() { tone(233, .22, "sawtooth", .035); tone(185, .3, "sawtooth", .035, .18); },
+  click() { tone(520, .04, "square", .02); },
+};
+window.addEventListener("pointerdown", initAudio, { once: true });
+window.addEventListener("keydown", initAudio, { once: true });
+
+/* ═══════════════ Утилиты времени/дат ═══════════════ */
+const pad = (n) => String(n).padStart(2, "0");
+const isoOfDay = (ts) => { const d = new Date(ts); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+const targetIso = (ts) => isoOfDay(ts + 7 * 86_400_000);
+const fmtDMY = (iso) => { const [y, m, d] = iso.split("-"); return `${d}.${m}.${y}`; };
+const getNow = () => Date.now();
+
+/* ═══════════════ Состояние ═══════════════ */
+let phase = "idle";              // idle | selected | sending
+let selectedISO = null;
+let windowOpenAt = null;         // начало текущего минутного окна
+let calOpenedAt = null;          // момент последнего открытия календаря
+let calOpen = false;
+let month = null;                // { y, m }
+let address = ADDRESSES[0];
+let addrOpen = false;
+let helpOpen = false;
+let result = null;               // {type:'success'|'fail', ...}
+let prevWindowOpen = false;
+let lastCalSig = "";
+let suppressClickUntil = 0;
+
+/* ═══════════════ DOM ═══════════════ */
+const $ = (id) => document.getElementById(id);
+const addrTrigger = $("addr-trigger"), addrText = $("addr-text"), addrChev = $("addr-chev"), addrPop = $("addr-pop");
+const dateTrigger = $("date-trigger"), dateText = $("date-text"), dateIco = $("date-ico"), calRoot = $("cal-root");
+const bookBtn = $("book-btn"), bookSpin = $("book-spin"), bookLabel = $("book-label");
+const helpBtn = $("help-btn"), helpIco = $("help-ico"), helpList = $("help-list");
+const toastVp = $("toast-vp");
+const dlgOverlay = $("dlg-overlay"), dlg = $("dlg");
+const cursorSpinner = $("cursor-spinner");
+
+/* ═══════════════ Тосты ═══════════════ */
+function showToast(title, description) {
+  const t = document.createElement("div");
+  t.className = "toast";
+  const h = document.createElement("div");
+  const p = document.createElement("div");
+  h.className = "toast-title"; h.textContent = title;
+  p.className = "toast-desc"; p.textContent = description;
+  const main = document.createElement("div");
+  main.appendChild(h); main.appendChild(p);
+  t.appendChild(main);
+  toastVp.appendChild(t);
+  setTimeout(() => { t.classList.add("out"); setTimeout(() => t.remove(), 250); }, 5000);
+}
+
+/* ═══════════════ Состояния окна ═══════════════ */
+function clockState() {
+  const now = getNow();
+  const windowOpenAtNow = Math.floor(now / MINUTE_MS) * MINUTE_MS;
+  const msIntoMinute = now - windowOpenAtNow;
+  return { now, windowOpenAtNow, msIntoMinute, windowOpen: msIntoMinute <= WINDOW_MS };
+}
+
+/* ═══════════════ Адресный список ═══════════════ */
+function renderAddrPop() {
+  addrPop.innerHTML = "";
+  for (const a of ADDRESSES) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "sel-item"; b.setAttribute("role", "option");
+    const s = document.createElement("span"); s.textContent = a;
+    b.appendChild(s);
+    if (a === address) { const c = document.createElement("span"); c.innerHTML = icon("check"); b.appendChild(c); }
+    b.addEventListener("click", () => {
+      address = a; addrOpen = false;
+      addrPop.hidden = true; addrTrigger.setAttribute("aria-expanded", "false");
+      renderAddrTrigger(); sounds.click();
+    });
+    addrPop.appendChild(b);
+  }
+}
+function renderAddrTrigger() { addrText.textContent = address; addrChev.innerHTML = icon("chevDown"); }
+addrTrigger.addEventListener("click", () => {
+  addrOpen = !addrOpen;
+  addrPop.hidden = !addrOpen;
+  addrTrigger.setAttribute("aria-expanded", String(addrOpen));
+  if (addrOpen) renderAddrPop();
+  sounds.click();
+});
+
+/* ═══════════════ Календарь ═══════════════ */
+function buildCells(y, m) {
+  const cells = [];
+  const lead = (new Date(y, m, 1).getDay() + 6) % 7;
+  const daysInMonth = new Date(y, m + 1, 0).getDate();
+  const daysInPrev = new Date(y, m, 0).getDate();
+  const pm = m === 0 ? 11 : m - 1, py = m === 0 ? y - 1 : y;
+  const nm = m === 11 ? 0 : m + 1, ny = m === 11 ? y + 1 : y;
+  for (let i = lead - 1; i >= 0; i--) cells.push({ d: daysInPrev - i, iso: `${py}-${pad(pm + 1)}-${pad(daysInPrev - i)}`, other: true });
+  for (let d = 1; d <= daysInMonth; d++) cells.push({ d, iso: `${y}-${pad(m + 1)}-${pad(d)}`, other: false });
+  let nd = 1;
+  while (cells.length < 42) { cells.push({ d: nd, iso: `${ny}-${pad(nm + 1)}-${pad(nd)}`, other: true }); nd++; }
+  return cells;
+}
+
+function renderCalendar() {
+  const { now, windowOpenAtNow } = clockState();
+  const targetISO = targetIso(now);
+  const todayISO = isoOfDay(now);
+  const targetActive = clockState().windowOpen && phase === "idle";
+  const dateActive = targetActive && calOpenedAt != null && calOpenedAt >= windowOpenAtNow;
+
+  calRoot.innerHTML = "";
+  if (!calOpen || !month) return;
+
+  const cal = document.createElement("div");
+  cal.className = "calendar";
+  cal.setAttribute("role", "group");
+  cal.setAttribute("aria-label", "Календарь бронирования");
+
+  const head = document.createElement("div"); head.className = "cal-head";
+  const gL = document.createElement("div"); gL.className = "nav-group";
+  const mkNav = (ic, label, fn) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "nav-btn"; b.setAttribute("aria-label", label);
+    b.innerHTML = icon(ic); b.addEventListener("click", fn);
+    return b;
+  };
+  gL.appendChild(mkNav("chevsLeft", "Предыдущий год", () => { month = { y: month.y - 1, m: month.m }; renderCalendar(); }));
+  gL.appendChild(mkNav("chevLeft", "Предыдущий месяц", () => { month = { y: month.y, m: month.m === 0 ? 11 : month.m - 1 }; renderCalendar(); }));
+  const title = document.createElement("div"); title.className = "cal-title";
+  title.textContent = `${MONTHS_SHORT[month.m]} ${month.y}`;
+  const gR = document.createElement("div"); gR.className = "nav-group";
+  gR.appendChild(mkNav("chevRight", "Следующий месяц", () => { month = { y: month.y, m: month.m === 11 ? 0 : month.m + 1 }; renderCalendar(); }));
+  gR.appendChild(mkNav("chevsRight", "Следующий год", () => { month = { y: month.y + 1, m: month.m }; renderCalendar(); }));
+  head.appendChild(gL); head.appendChild(title); head.appendChild(gR);
+  cal.appendChild(head);
+
+  const grid = document.createElement("div"); grid.className = "cal-grid";
+  for (const w of WEEKDAYS) {
+    const d = document.createElement("div"); d.className = "wd"; d.textContent = w;
+    grid.appendChild(d);
+  }
+  for (const c of buildCells(month.y, month.m)) {
+    const wrap = document.createElement("div"); wrap.className = "day-cell";
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "day";
+    const isTarget = c.iso === targetISO && !c.other;
+    const isSelected = c.iso === selectedISO && !c.other;
+    const isToday = c.iso === todayISO && !c.other;
+    let label = `${c.d} ${MONTHS_SHORT[month.m]} ${month.y}`;
+    if (c.other) { b.classList.add("other"); b.disabled = true; }
+    else if (isSelected) { b.classList.add("selected"); }
+    else if (isTarget && dateActive) { b.classList.add("target-on"); }
+    else if (isTarget) { b.classList.add("target-off"); b.disabled = true; b.title = "Дата доступна только 5 секунд в начале минуты"; }
+    else { b.classList.add("normal"); }
+    if (isTarget) label += " — дата на неделю вперёд";
+    if (isToday && !isSelected && !(isTarget && dateActive)) b.classList.add("today-ring");
+    b.setAttribute("aria-label", label);
+    b.addEventListener("click", () => {
+      if (isTarget && dateActive) selectTarget();
+      else if (!c.other && !isTarget) hintOtherDay();
+    });
+    b.textContent = c.d;
+    wrap.appendChild(b);
+    grid.appendChild(wrap);
+  }
+  cal.appendChild(grid);
+  calRoot.appendChild(cal);
+}
+
+dateTrigger.addEventListener("click", () => {
+  if (!calOpen) {
+    calOpenedAt = getNow();
+    const now = getNow();
+    const t = targetIso(now);
+    const [y, m] = t.split("-").map(Number);
+    month = { y, m: m - 1 };
+  }
+  calOpen = !calOpen;
+  dateTrigger.setAttribute("aria-expanded", String(calOpen));
+  renderCalendar();
+  sounds.click();
+});
+
+/* Клик по целевой дате — только в окно и если календарь открыт в окно */
+function selectTarget() {
+  const { now, msIntoMinute, windowOpenAtNow } = clockState();
+  if (msIntoMinute > WINDOW_MS) {
+    showToast("Окно закрыто", "Дата доступна только 5 секунд в начале минуты");
+    return;
+  }
+  if (calOpenedAt == null || calOpenedAt < windowOpenAtNow) return;
+  windowOpenAt = windowOpenAtNow;
+  selectedISO = targetIso(now);
+  phase = "selected";
+  calOpen = false;
+  dateTrigger.setAttribute("aria-expanded", "false");
+  renderCalendar(); updateField(); updateBookBtn();
+  sounds.click();
+}
+function hintOtherDay() {
+  showToast("Неделя вперёд", "Выбрать дату можно только на неделю вперёд");
+}
+
+/* ═══════════════ Поле даты и кнопка ═══════════════ */
+function updateField() {
+  const { windowOpen } = clockState();
+  const hasSelection = phase !== "idle" && selectedISO != null;
+  dateText.textContent = hasSelection ? fmtDMY(selectedISO) : "Нет свободных мест";
+  dateText.className = "txt " + (hasSelection ? "field-selected" : "field-empty");
+  const targetActive = windowOpen && phase === "idle";
+  dateTrigger.classList.toggle("window-open", targetActive);
+  dateIco.className = "icon-box" + (targetActive ? " active" : "");
+  dateIco.innerHTML = icon("calendar");
+}
+function updateBookBtn() {
+  const enabled = phase === "selected";
+  bookBtn.disabled = !enabled;
+  bookSpin.hidden = phase !== "sending";
+  bookSpin.innerHTML = phase === "sending" ? icon("loader") : "";
+  $("book-spin").querySelector("svg")?.classList.add("spin");
+  cursorSpinner.hidden = phase !== "sending";
+  bookLabel.innerHTML = `${icon("car")}Забронировать`;
+}
+
+/* ═══════════════ Бронирование ═══════════════ */
+bookBtn.addEventListener("click", () => {
+  if (phase !== "selected" || !selectedISO || windowOpenAt == null) return;
+  const reactionMs = Math.max(0, Math.round(getNow() - windowOpenAt));
+  phase = "sending";
+  updateField(); updateBookBtn();
+  renderResult();
+
+  const failRandom = () => {
+    const m = FAIL_MESSAGES[Math.floor(Math.random() * FAIL_MESSAGES.length)];
+    result = { type: "fail", title: m.title, subtitle: m.subtitle };
+    sounds.fail();
+    phase = "idle"; selectedISO = null; windowOpenAt = null;
+    renderResult(); updateField(); updateBookBtn();
+  };
+  const finishOk = () => {
+    const booking = {
+      id: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now())),
+      carNumber: CAR_NUMBER, address, date: selectedISO, reactionMs,
+      createdAt: new Date().toISOString(),
+    };
+    try {
+      const arr = JSON.parse(localStorage.getItem("bookings") || "[]");
+      arr.push(booking);
+      localStorage.setItem("bookings", JSON.stringify(arr.slice(-50)));
+    } catch {}
+    result = { type: "success", booking, reactionMs };
+    sounds.success();
+    phase = "idle"; selectedISO = null; windowOpenAt = null;
+    renderResult(); updateField(); updateBookBtn();
+  };
+
+  // «Сервер»: успел за 1500 мс → успех через 10 с, иначе ошибка через 20 с
+  if (reactionMs <= BOOK_WINDOW_MS) setTimeout(finishOk, SUCCESS_DELAY_MS);
+  else setTimeout(failRandom, TIMEOUT_MS);
+});
+
+/* ═══════════════ Диалог результата ═══════════════ */
+function renderResult() {
+  const open = result !== null;
+  dlgOverlay.hidden = !open;
+  dlg.hidden = !open;
+  if (!open) { dlg.innerHTML = ""; return; }
+  dlg.innerHTML = "";
+
+  if (result.type === "success") {
+    const x = document.createElement("button");
+    x.type = "button"; x.className = "dlg-x"; x.setAttribute("aria-label", "Закрыть");
+    x.innerHTML = icon("x");
+    x.addEventListener("click", () => { result = null; renderResult(); });
+    dlg.appendChild(x);
+
+    const ic = document.createElement("div"); ic.className = "succ-icon"; ic.innerHTML = icon("check2");
+    const h = document.createElement("div"); h.className = "dlg-title"; h.textContent = "Парковка забронирована";
+    const d = document.createElement("div"); d.className = "dlg-desc";
+    d.textContent = `${result.booking.address} · ${fmtDMY(result.booking.date)}`;
+    const badge = document.createElement("div"); badge.className = "react-badge";
+    badge.innerHTML = `${icon("zap")}<span>Реакция: ${result.reactionMs} мс</span>`;
+    const btn = document.createElement("button");
+    btn.type = "button"; btn.className = "dlg-btn"; btn.textContent = "Отлично";
+    btn.addEventListener("click", () => { result = null; renderResult(); });
+    dlg.appendChild(ic); dlg.appendChild(h); dlg.appendChild(d); dlg.appendChild(badge); dlg.appendChild(btn);
+  } else {
+    const wrap = document.createElement("div"); wrap.className = "fail-wrap";
+    const h = document.createElement("div"); h.className = "dlg-title orange"; h.textContent = result.title;
+    wrap.appendChild(h);
+    if (result.subtitle) {
+      const d = document.createElement("div"); d.className = "dlg-desc"; d.textContent = result.subtitle;
+      wrap.appendChild(d);
+    }
+    dlg.appendChild(wrap);
+  }
+}
+
+/* ═══════════════ Подсказка ═══════════════ */
+helpIco.innerHTML = icon("help");
+helpBtn.addEventListener("click", () => { helpOpen = !helpOpen; helpList.hidden = !helpOpen; });
+
+/* ═══════════════ Спиннер у курсора ═══════════════ */
+cursorSpinner.innerHTML = icon("loader");
+$("cursor-spinner").querySelector("svg")?.classList.add("spin");
+window.addEventListener("mousemove", (e) => {
+  if (phase === "sending") cursorSpinner.style.transform = `translate(${e.clientX + 14}px, ${e.clientY + 16}px)`;
+});
+
+/* ═══════════════ Глобальные закрытия ═══════════════ */
+window.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (calOpen) { calOpen = false; dateTrigger.setAttribute("aria-expanded", "false"); renderCalendar(); }
+  else if (addrOpen) { addrOpen = false; addrPop.hidden = true; addrTrigger.setAttribute("aria-expanded", "false"); }
+  else if (result) { result = null; renderResult(); }
+});
+document.addEventListener("pointerdown", (e) => {
+  // клик мимо открытого поповера/календаря закрывает их
+  if (addrOpen && !addrPop.contains(e.target) && !addrTrigger.contains(e.target)) {
+    addrOpen = false; addrPop.hidden = true; addrTrigger.setAttribute("aria-expanded", "false");
+  }
+  if (calOpen && !calRoot.contains(e.target) && !dateTrigger.contains(e.target)) {
+    calOpen = false; dateTrigger.setAttribute("aria-expanded", "false"); renderCalendar();
+  }
+  // диалог: клик мимо содержимого закрывает его (как в Radix)
+  if (result && !dlg.contains(e.target)) {
+    result = null; renderResult();
+    suppressClickUntil = Date.now() + 400; // не «продавливать» клик сквозь закрывшийся диалог
+  }
+}, true);
+document.addEventListener("click", (e) => {
+  if (Date.now() < suppressClickUntil) { e.stopPropagation(); e.preventDefault(); }
+}, true);
+
+/* ═══════════════ Игровой цикл (16 мс) ═══════════════ */
+function tick() {
+  const { windowOpen, windowOpenAtNow } = clockState();
+
+  // открытие окна: звук + календарь перелистывается на месяц цели
+  if (windowOpen && !prevWindowOpen) {
+    sounds.windowOpen();
+    const t = targetIso(getNow());
+    const [y, m] = t.split("-").map(Number);
+    month = { y, m: m - 1 };
+    if (calOpen) renderCalendar();
+  }
+  prevWindowOpen = windowOpen;
+
+  // окно стартовало — пересчитать метку начала окна
+  if (windowOpen && windowOpenAtNow !== windowOpenAt && phase === "idle") windowOpenAt = null;
+
+  updateField();
+
+  // календарь: перерисовать при смене активных состояний
+  if (calOpen) {
+    const targetActive = windowOpen && phase === "idle";
+    const dateActive = targetActive && calOpenedAt != null && calOpenedAt >= windowOpenAtNow;
+    const sig = `${dateActive}|${month.y}-${month.m}|${selectedISO}`;
+    if (sig !== lastCalSig) { renderCalendar(); lastCalSig = sig; }
+  } else {
+    lastCalSig = "";
+  }
+}
+
+/* ═══════════════ Старт ═══════════════ */
+renderAddrTrigger();
+updateField();
+updateBookBtn();
+tick();
+setInterval(tick, 16);
+})();
+</script>
+</body>
+</html>
