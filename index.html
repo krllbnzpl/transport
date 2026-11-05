@@ -86,6 +86,7 @@
     display:flex; align-items:center; justify-content:center; cursor:default; color:#9ca3af;
   }
   .cell.selected { background:var(--green); color:#fff; font-weight:700; box-shadow:0 0 0 4px rgba(47,197,83,.2); }
+  .cell.today { box-shadow:0 0 0 1px #000; } /* тонкая чёрная рамка на сегодняшней дате */
 
   /* ───── кнопка «Забронировать» ───── */
   .book-btn {
@@ -456,6 +457,7 @@ function renderCalendar() {
   el.dateBtn.setAttribute("aria-expanded", "true");
   const { y, m } = state.month;
   const targetISO = targetIso(Date.now());
+  const todayISO = isoOfDay(Date.now());
   const dateActive = isDateActive();
   let html = `
     <div class="cal-head">
@@ -475,9 +477,11 @@ function renderCalendar() {
   for (const c of buildCells(y, m)) {
     const isTarget = c.iso === targetISO && !c.other;
     const isSelected = c.iso === state.selectedISO && !c.other;
+    const isToday = c.iso === todayISO && !c.other;
     const clickable = isTarget && dateActive;
-    // все даты — ровно одинаковый серый; зелёной становится только выбранная (по клику)
-    const cls = isSelected ? "cell selected" : "cell";
+    // все даты — ровно одинаковый серый; зелёной становится только выбранная (по клику),
+    // сегодняшняя — с тонкой чёрной рамкой
+    const cls = isSelected ? "cell selected" : isToday ? "cell today" : "cell";
     html += `
       <div class="cell-wrap">
         <button type="button" class="${cls}" aria-label="${c.d} ${MONTHS_SHORT[m]} ${y}"
