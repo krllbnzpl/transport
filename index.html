@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Бронирование парковки — игра на скорость реакции</title>
-<meta name="description" content="Каждую минуту ровно в :00 дата на неделю вперёд доступна 5 секунд. Успей выбрать её и нажать «Забронировать» в первые 1,5 секунды!" />
+<meta name="description" content="Каждую минуту ровно в :00 дата на неделю вперёд доступна 5 секунд. Успей выбрать её и нажать «Забронировать» в первые 2 секунды! Три режима: NORMAL, HARDCORE и NIGHTMARE." />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -33,6 +33,17 @@
   .label { font-size:13px; color:#9ca3af; display:block; }
   .mt16 { margin-top:16px; }
   .mt20 { margin-top:20px; }
+
+  /* ───── выбор режима (сверху экрана) ───── */
+  .mode-switch { position:fixed; top:16px; left:50%; transform:translateX(-50%); z-index:40;
+    display:flex; gap:4px; background:rgba(255,255,255,.95); backdrop-filter:blur(8px);
+    border-radius:9999px; padding:4px;
+    box-shadow:0 10px 15px -3px rgba(0,0,0,.1), 0 4px 6px -4px rgba(0,0,0,.1); }
+  .mode-btn { border:none; background:none; border-radius:9999px; padding:7px 14px;
+    font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+    color:#6b7280; cursor:pointer; transition:all .15s; }
+  .mode-btn:hover { color:#374151; }
+  .mode-btn.active { background:var(--green); color:#fff; }
 
   /* ───── выбор адреса ───── */
   .addr-wrap { position:relative; }
@@ -193,6 +204,13 @@
 <!-- спиннер, следующий за курсором -->
 <div id="cursorSpinner" class="cursor-spinner"></div>
 
+<!-- выбор режима -->
+<div id="modeSwitch" class="mode-switch" role="tablist" aria-label="Режим игры">
+  <button type="button" class="mode-btn active" data-mode="NORMAL" role="tab" aria-selected="true" title="Успеть за 2 секунды">NORMAL</button>
+  <button type="button" class="mode-btn" data-mode="HARDCORE" role="tab" aria-selected="false" title="1,75 секунды и бронь в половине случаев">HARDCORE</button>
+  <button type="button" class="mode-btn" data-mode="NIGHTMARE" role="tab" aria-selected="false" title="1,5 секунды и бронь в 1 случае из 4">NIGHTMARE</button>
+</div>
+
 <main>
   <section class="card">
     <h1>Бронирование парковки</h1>
@@ -251,8 +269,14 @@
 
 /* ───────── константы (как в серверной версии) ───────── */
 const WINDOW_MS = 5000;          // окно выбора даты каждую минуту
-const BOOK_WINDOW_MS = 2000;     // «Забронировать» успешно только в первые 2000 мс
+/* «Время успеха» по режимам (лимит + 200 мс допуск на задержку):
+   NORMAL — 1800 + 200 = 2000 мс, HARDCORE — 1550 + 200 = 1750 мс,
+   NIGHTMARE — 1300 + 200 = 1500 мс */
+const BOOK_WINDOW_BY_MODE = { NORMAL: 1800, HARDCORE: 1550, NIGHTMARE: 1300 };
 const LATENCY_TOLERANCE_MS = 200;// допуск на задержку
+/* Вероятность брони даже при попадании в «время успеха»:
+   NORMAL — всегда, HARDCORE — 50%, NIGHTMARE — 25% */
+const MODE_SUCCESS_CHANCE = { NORMAL: 1, HARDCORE: 0.5, NIGHTMARE: 0.25 };
 const SUCCESS_DELAY_MS = 10000;  // спиннер перед успехом
 const TIMEOUT_MS = 20000;        // спиннер перед неудачей
 
@@ -276,6 +300,7 @@ const state = {
   calOpen: false,
   month: null,            // {y,m}
   address: ADDRESSES[0],
+  mode: "NORMAL",         // NORMAL | HARDCORE | NIGHTMARE
   result: null,
   helpOpen: false,
   addrOpen: false,
@@ -366,7 +391,7 @@ const el = {
   addrTrigger: $("addrTrigger"), addrValue: $("addrValue"), addrList: $("addrList"),
   dateBtn: $("dateBtn"), dateText: $("dateText"), calIconWrap: $("calIconWrap"),
   calendar: $("calendar"), bookBtn: $("bookBtn"), btnSpinner: $("btnSpinner"),
-  helpBtn: $("helpBtn"), helpList: $("helpList"),
+  helpBtn: $("helpBtn"), helpList: $("helpList"), modeSwitch: $("modeSwitch"),
   cursorSpinner: $("cursorSpinner"), overlay: $("dlgOverlay"), dlg: $("dlg"),
 };
 
@@ -438,6 +463,19 @@ document.addEventListener("click", (e) => {
     el.addrTrigger.classList.remove("open");
     el.addrTrigger.setAttribute("aria-expanded", "false");
   }
+});
+
+/* ───────── выбор режима ───────── */
+el.modeSwitch.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-mode]");
+  if (!btn) return;
+  state.mode = btn.dataset.mode;
+  for (const b of el.modeSwitch.querySelectorAll("[data-mode]")) {
+    const on = b.dataset.mode === state.mode;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-selected", on);
+  }
+  sounds.click();
 });
 
 /* ───────── поле даты ───────── */
@@ -568,13 +606,16 @@ function pressBook() {
   renderDateField();
 
   /* Проверка «сервера» (локальная копия логики /api/book):
-     успех — запрос в то же минутное окно и не позже 1500 мс (+200 мс допуск) */
+     успех — запрос в то же минутное окно и не позже «времени успеха» режима
+     (NORMAL 2000 мс, HARDCORE 1750 мс, NIGHTMARE 1500 мс с учётом допуска),
+     а в HARDCORE/NIGHTMARE бронь ещё и «выпадает» с вероятностью (50% / 25%) */
   const msIntoMinute = now % 60000;
   const currentWindowOpenAt = Math.floor(now / 60000) * 60000;
   const inSuccess =
     sentWindowOpenAt === currentWindowOpenAt &&
-    msIntoMinute <= BOOK_WINDOW_MS + LATENCY_TOLERANCE_MS &&
-    sentDate === targetIso(now);
+    msIntoMinute <= BOOK_WINDOW_BY_MODE[state.mode] + LATENCY_TOLERANCE_MS &&
+    sentDate === targetIso(now) &&
+    Math.random() < MODE_SUCCESS_CHANCE[state.mode];
 
   const finish = () => {
     if (inSuccess) {
